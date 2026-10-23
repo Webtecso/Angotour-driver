@@ -1,0 +1,16 @@
+﻿{
+  "expo": {
+    "name": "AngoTour Driver",
+    "slug": "angotour-driver",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "scheme": "angotourdriver",
+    "assetBundlePatterns": ["**/*"],
+    "ios": { "supportsTablet": true, "bundleIdentifier": "ao.angotour.driver" },
+    "android": { "package": "ao.angotour.driver" },
+    "web": { "bundler": "metro" },
+    "plugins": ["expo-font", ["expo-image-picker", { "cameraPermission": "A AngoTour precisa da camara para fotografar os teus documentos.", "photosPermission": "A AngoTour precisa de aceder as fotos para enviares os teus documentos." }]]
+  }
+}
+
