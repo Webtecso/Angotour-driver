@@ -13,6 +13,7 @@ type Props = NativeStackScreenProps<ProfileStackParamList, 'ProfileMain'>;
 const MENU_ITEMS: { icon: React.ComponentProps<typeof Ionicons>['name']; label: string; route?: keyof ProfileStackParamList }[] = [
   { icon: 'document-text-outline', label: 'Meus documentos', route: 'DocumentCenter' },
   { icon: 'car-outline', label: 'Meu veiculo', route: 'Vehicle' },
+  { icon: 'calendar-outline', label: 'Servicos mensais', route: 'MonthlyServices' },
   { icon: 'star-outline', label: 'Avaliacoes' },
   { icon: 'trophy-outline', label: 'Incentivos', route: 'Incentives' },
   { icon: 'briefcase-outline', label: 'Objetos perdidos', route: 'LostItems' },

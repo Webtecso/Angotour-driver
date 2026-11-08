@@ -5,7 +5,8 @@ import { Ionicons } from '@expo/vector-icons';
 import ScreenContainer from '../../components/common/ScreenContainer';
 import Button from '../../components/common/Button';
 import { useDriver } from '../../contexts/DriverContext';
-import { driverVehicleApi, DriverVehicleView } from '../../services/api';
+import * as Location from 'expo-location';
+import { driverSafetyApi, driverVehicleApi, DriverVehicleView } from '../../services/api';
 import { HomeStackParamList } from '../../navigation/types';
 import { colors, radius, spacing, typography } from '../../constants/theme';
 
@@ -15,6 +16,7 @@ export default function TripNavigationScreen({ navigation }: Props) {
   const { activeTrip, markArrived, confirmBoarding, startTrip, completeTrip, clearActiveTrip } = useDriver();
   const [codeInput, setCodeInput] = useState('');
   const [codeError, setCodeError] = useState(false);
+  const [codeMessage, setCodeMessage] = useState('');
   const [isConfirming, setIsConfirming] = useState(false);
   const [vehicleConfirmed, setVehicleConfirmed] = useState(false);
   const [sosVisible, setSosVisible] = useState(false);
@@ -32,12 +34,14 @@ export default function TripNavigationScreen({ navigation }: Props) {
 
   const handleConfirmBoarding = async () => {
     setIsConfirming(true);
-    const ok = await confirmBoarding(codeInput);
+    const result = await confirmBoarding(codeInput);
     setIsConfirming(false);
-    if (!ok) {
+    if (!result.ok) {
+      setCodeMessage(result.message ?? '');
       setCodeError(true);
       return;
     }
+    setCodeMessage('');
     setCodeError(false);
   };
 
@@ -50,9 +54,26 @@ export default function TripNavigationScreen({ navigation }: Props) {
     navigation.popToTop();
   };
 
-  const handleSos = (reason: string) => {
+  const handleSos = async (reason: string) => {
     setSosVisible(false);
-    Alert.alert('Alerta enviado', `Localizacao enviada ao backend (${reason}) - simulacao.`);
+    let latitude: number | undefined;
+    let longitude: number | undefined;
+    try {
+      const pos = (await Location.getLastKnownPositionAsync()) ?? (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }));
+      latitude = pos.coords.latitude;
+      longitude = pos.coords.longitude;
+    } catch {
+      // sem GPS: o alerta segue na mesma, sem posicao
+    }
+    try {
+      const r = await driverSafetyApi.alert({ category: reason, tripId: activeTrip?.id, latitude, longitude });
+      Alert.alert(
+        'Alerta enviado',
+        'Caso ' + r.caseNumber + ' registado. A central de seguranca foi avisada.' + (latitude === undefined ? ' Nao foi possivel obter a tua posicao.' : '')
+      );
+    } catch (e) {
+      Alert.alert('Nao foi possivel enviar o alerta', (e as Error).message + '\n\nSe estas em perigo, contacta diretamente as autoridades.');
+    }
   };
 
   // --- Estado: a caminho do passageiro ---
@@ -104,7 +125,7 @@ export default function TripNavigationScreen({ navigation }: Props) {
             keyboardType="number-pad"
             maxLength={4}
           />
-          {codeError ? <Text style={styles.codeErrorText}>Codigo incorreto. Confirma com o passageiro.</Text> : null}
+          {codeError ? <Text style={styles.codeErrorText}>{codeMessage || 'Codigo incorreto. Confirma com o passageiro.'}</Text> : null}
 
           <Button label="CONFIRMAR EMBARQUE" onPress={handleConfirmBoarding} loading={isConfirming} disabled={codeInput.length !== 4 || isConfirming} style={{ marginTop: spacing.md }} />
         </ScrollView>

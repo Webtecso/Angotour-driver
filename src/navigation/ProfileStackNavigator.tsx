@@ -7,6 +7,7 @@ import IncentivesScreen from '../screens/profile/IncentivesScreen';
 import DocumentCenterScreen from '../screens/profile/DocumentCenterScreen';
 import LostItemsScreen from '../screens/profile/LostItemsScreen';
 import TourismProfileScreen from '../screens/profile/TourismProfileScreen';
+import MonthlyServicesScreen from '../screens/profile/MonthlyServicesScreen';
 
 const Stack = createNativeStackNavigator<ProfileStackParamList>();
 
@@ -19,6 +20,7 @@ export default function ProfileStackNavigator() {
       <Stack.Screen name="DocumentCenter" component={DocumentCenterScreen} />
       <Stack.Screen name="LostItems" component={LostItemsScreen} />
       <Stack.Screen name="TourismProfile" component={TourismProfileScreen} />
+      <Stack.Screen name="MonthlyServices" component={MonthlyServicesScreen} />
     </Stack.Navigator>
   );
 }

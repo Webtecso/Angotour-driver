@@ -15,6 +15,7 @@ export type HomeStackParamList = {
 };
 
 export type ProfileStackParamList = {
+  MonthlyServices: undefined;
   ProfileMain: undefined;
   Vehicle: undefined;
   Incentives: undefined;

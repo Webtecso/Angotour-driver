@@ -23,7 +23,7 @@ interface DriverContextValue {
   acceptIncomingTrip: () => void;
   declineIncomingTrip: () => void;
   markArrived: () => void;
-  confirmBoarding: (enteredCode: string) => Promise<boolean>;
+  confirmBoarding: (enteredCode: string) => Promise<{ ok: boolean; message?: string }>;
   startTrip: () => Promise<void>;
   completeTrip: () => Promise<void>;
   clearActiveTrip: () => void;
@@ -291,19 +291,20 @@ export function DriverProvider({ children }: { children: React.ReactNode }) {
   const markArrived = () => setTripStatus('arrived');
 
   /** O codigo e sempre comparado no servidor - o motorista nunca o recebe. */
-  const confirmBoarding = async (enteredCode: string): Promise<boolean> => {
-    if (!activeTrip) return false;
+  const confirmBoarding = async (enteredCode: string): Promise<{ ok: boolean; message?: string }> => {
+    if (!activeTrip) return { ok: false };
     if (isSimulatedTripRef.current) {
-      if (enteredCode.length !== 4) return false;
+      if (enteredCode.length !== 4) return { ok: false, message: 'Codigo incorreto.' };
       setTripStatus('boarding');
-      return true;
+      return { ok: true };
     }
     try {
       await driverTripsApi.confirmBoarding(activeTrip.id, enteredCode);
       setTripStatus('boarding');
-      return true;
-    } catch {
-      return false;
+      return { ok: true };
+    } catch (e) {
+      // O servidor distingue codigo errado, limite de tentativas e distancia ao ponto de recolha.
+      return { ok: false, message: (e as Error).message };
     }
   };
 

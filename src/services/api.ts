@@ -1,4 +1,4 @@
-﻿import AsyncStorage from '@react-native-async-storage/async-storage';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_BASE_URL } from '../constants/env';
 
 const TOKEN_KEY = '@angotour_driver/access_token';
@@ -102,6 +102,7 @@ export interface DriverTripView {
   distanceToPassengerKm: number | null;
   priceKz: number;
   commissionKz: number;
+  zoneIncentiveKz: number;
   netEarningsKz: number;
   paymentMethodType: string;
   boardingConfirmed: boolean;
@@ -121,7 +122,7 @@ export const driverTripsApi = {
 // --- Carteira do motorista (saldo, reserva e liquidacao de comissao no servidor) ---
 export interface DriverWalletEntryView {
   id: string;
-  kind: 'topup' | 'commission';
+  kind: 'topup' | 'commission' | 'zone_incentive';
   status: string;
   amountKz: number;
   reference: string | null;
@@ -137,7 +138,11 @@ export interface DriverWalletSummary {
   todayGrossKz: number;
   todayTrips: number;
   commissionsTodayKz: number;
+  todayDistanceKm: number;
+  zoneIncentivesTodayKz: number;
   todayNetKz: number;
+  estimatedFuelCostKz: number;
+  todayNetAfterFuelKz: number;
   entries: DriverWalletEntryView[];
 }
 
@@ -183,4 +188,31 @@ export const driverVehicleApi = {
   get: () => request<{ vehicle: DriverVehicleView | null }>('/driver/vehicle', { auth: true }),
   save: (body: { model: string; plate: string; color: string; categoryId: string; capacity: number }) =>
     request<{ vehicle: DriverVehicleView }>('/driver/vehicle', { method: 'POST', body, auth: true }),
+};
+
+// --- Seguranca do motorista: alerta com motivo, viagem e posicao ---
+export const driverSafetyApi = {
+  alert: (body: { category: string; tripId?: string; latitude?: number; longitude?: number }) =>
+    request<{ caseNumber: string; severity: string; status: string }>('/driver/safety/alert', { method: 'POST', body, auth: true }),
+};
+
+// --- Servicos mensais do motorista (ida/volta de cada contrato AngoTour Mensal) ---
+export interface MonthlyExecutionView {
+  id: string;
+  date: string; // AAAA-MM-DD
+  direction: 'ida' | 'volta';
+  scheduledTime: string;
+  status: 'agendada' | 'em_curso' | 'concluida' | 'cancelada';
+  startedAt: string | null;
+  completedAt: string | null;
+  originLabel: string;
+  destinationLabel: string;
+  passengerCount: number;
+  passengerFirstName: string | null;
+}
+
+export const driverMonthlyApi = {
+  list: () => request<MonthlyExecutionView[]>('/driver/monthly/executions', { auth: true }),
+  start: (id: string) => request<unknown>(`/driver/monthly/executions/${id}/start`, { method: 'POST', auth: true }),
+  complete: (id: string) => request<unknown>(`/driver/monthly/executions/${id}/complete`, { method: 'POST', auth: true }),
 };
