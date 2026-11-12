@@ -146,11 +146,29 @@ export interface DriverWalletSummary {
   entries: DriverWalletEntryView[];
 }
 
+// --- Reservas: o motorista reserva com antecedencia; a atribuicao real e feita pelo servidor perto da hora ---
+export interface ScheduledTripView {
+  id: string;
+  dateIso: string;
+  originLabel: string;
+  destinationLabel: string;
+  estimatedEarningsKz: number;
+  zoneIncentiveKz: number;
+  distanceKm: number;
+  isAccepted: boolean;
+}
+
+export const driverReservationsApi = {
+  list: () => request<ScheduledTripView[]>('/driver/trips/scheduled', { auth: true }),
+  reserve: (id: string) => request<{ ok: boolean }>(`/driver/trips/${id}/reserve`, { method: 'POST', auth: true }),
+  release: (id: string) => request<{ ok: boolean }>(`/driver/trips/${id}/reserve`, { method: 'DELETE', auth: true }),
+};
+
 export const driverWalletApi = {
   summary: () => request<DriverWalletSummary>('/driver/wallet', { auth: true }),
-  startTopUp: (amountKz: number) =>
+  startTopUp: (amountKz: number, method?: string) =>
     request<{ id: string; reference: string; amountKz: number; status: string }>('/driver/wallet/topups', {
-      method: 'POST', body: { amountKz }, auth: true,
+      method: 'POST', body: { amountKz, method }, auth: true,
     }),
   confirmTopUp: (id: string) => request<unknown>(`/driver/wallet/topups/${id}/confirm`, { method: 'POST', auth: true }),
 };
@@ -215,4 +233,64 @@ export const driverMonthlyApi = {
   list: () => request<MonthlyExecutionView[]>('/driver/monthly/executions', { auth: true }),
   start: (id: string) => request<unknown>(`/driver/monthly/executions/${id}/start`, { method: 'POST', auth: true }),
   complete: (id: string) => request<unknown>(`/driver/monthly/executions/${id}/complete`, { method: 'POST', auth: true }),
+};
+
+// --- Perfil, ganhos por periodo e historico (dados reais) ---
+export interface DriverProfileView {
+  id: string; fullName: string; phone: string; rating: number; status: string; isVerified: boolean;
+  memberSince: string; tripsCompleted: number; tripsCancelled: number;
+}
+export interface EarningsPeriod { grossKz: number; commissionKz: number; netKz: number; trips: number }
+export interface DriverHistoryItem {
+  id: string; status: string; priceKz: number; distanceKm: number; createdAt: string; completedAt: string | null;
+  originLabel: string | null; destinationLabel: string | null;
+}
+export const driverProfileApi = {
+  me: () => request<DriverProfileView>('/driver/profile', { auth: true }),
+  earnings: () => request<Record<'today' | 'week' | 'month', EarningsPeriod>>('/driver/profile/earnings', { auth: true }),
+  history: () => request<DriverHistoryItem[]>('/driver/profile/history', { auth: true }),
+};
+
+// --- Chat motorista-passageiro (so participantes da viagem) ---
+export interface ChatMessageView { id: string; senderRole: 'passenger' | 'driver'; body: string; createdAt: string; fromMe: boolean }
+export interface ChatThreadView { messages: ChatMessageView[]; canSend: boolean }
+export const driverChatApi = {
+  list: (tripId: string) => request<ChatThreadView>(`/driver/chat/trips/${tripId}/messages`, { auth: true }),
+  send: (tripId: string, body: string) =>
+    request<ChatMessageView>(`/driver/chat/trips/${tripId}/messages`, { method: 'POST', body: { body }, auth: true }),
+};
+
+// --- Extras do motorista: objetos perdidos, procura, incentivos e perfil turismo ---
+export interface LostItemView { id: string; category: 'phone' | 'wallet' | 'documents' | 'clothing' | 'other'; description: string; tripRef?: string; dateIso: string; status: 'reported' | 'matched' | 'returned' }
+export interface DemandZoneView { latitude: number; longitude: number; radiusMeters: number; intensity: 'high' | 'medium' | 'normal' }
+export interface IncentivesView {
+  dailyGoal: { achievedKz: number; targetKz: number };
+  challenges: { id: string; title: string; description: string; rewardKz: number; progressCount: number; targetCount: number; expiresInDays: number }[];
+}
+export interface TourismView {
+  hasTrainingCompleted: boolean; languages: string[]; minimumRating: number; currentRating: number;
+  isEligible: boolean; isActive: boolean; availableLanguages: string[];
+}
+export const driverExtrasApi = {
+  lostItems: () => request<LostItemView[]>('/driver/extras/lost-items', { auth: true }),
+  reportLostItem: (body: { category: string; description: string }) => request<{ caseNumber: string }>('/driver/extras/lost-items', { method: 'POST', body, auth: true }),
+  demand: () => request<{ zones: DemandZoneView[]; forecast: string | null }>('/driver/extras/demand', { auth: true }),
+  incentives: () => request<IncentivesView>('/driver/extras/incentives', { auth: true }),
+  tourism: () => request<TourismView>('/driver/extras/tourism', { auth: true }),
+  setTourismLanguages: (languages: string[]) => request<TourismView>('/driver/extras/tourism/languages', { method: 'POST', body: { languages }, auth: true }),
+  setTourismActive: (active: boolean) => request<TourismView>('/driver/extras/tourism/active', { method: 'POST', body: { active }, auth: true }),
+};
+
+// --- Avaliacoes recebidas e suporte ---
+export interface RatingsView {
+  count: number; average: number;
+  distribution: { stars: number; count: number }[];
+  recent: { stars: number; comment: string; createdAt: string }[];
+}
+export interface SupportCaseView { id: string; caseNumber: string; category: string; description: string; status: string; createdAt: string }
+export const driverSupportApi = {
+  ratings: () => request<RatingsView>('/driver/extras/ratings', { auth: true }),
+  list: () => request<SupportCaseView[]>('/driver/extras/support', { auth: true }),
+  create: (subject: string, description: string) =>
+    request<{ caseNumber: string }>('/driver/extras/support', { method: 'POST', body: { subject, description }, auth: true }),
 };

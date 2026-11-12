@@ -1,10 +1,11 @@
-﻿import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import * as Location from 'expo-location';
 import { Alert } from 'react-native';
 import { ActiveDriverTrip, DriverDocumentSlot, DriverTripStatus, IncomingTripRequest } from '../types';
-import { buildActiveTripFromRequest, mockDocumentSlots, mockWallet } from '../services/mockData';
+import { DOCUMENT_SLOTS } from '../constants/documentSlots';
 import { io, Socket } from 'socket.io-client';
 import { driversApi, driverTripsApi, driverWalletApi, driverDocumentsApi, DriverDocumentServerType, DriverTripView, DriverWalletSummary } from '../services/api';
+import { registerForPushNotificationsAsync } from '../services/pushNotifications';
 import { API_BASE_URL } from '../constants/env';
 import { useDriverAuth } from './DriverAuthContext';
 
@@ -27,14 +28,13 @@ interface DriverContextValue {
   startTrip: () => Promise<void>;
   completeTrip: () => Promise<void>;
   clearActiveTrip: () => void;
-  simulateIncomingTrip: (request: IncomingTripRequest) => void;
   documentSlots: DriverDocumentSlot[];
   areDocumentsApproved: boolean;
   submitDocument: (id: string, imageBase64: string) => Promise<void>;
   refreshDocuments: () => Promise<void>;
 }
 
-// Liga os documentos do ecra (ids do mock) aos tipos que o servidor conhece.
+// Liga os documentos do ecra aos tipos que o servidor conhece.
 const DOC_ID_TO_TYPE: Record<string, DriverDocumentServerType> = {
   'doc-bi-front': 'bi_front',
   'doc-bi-back': 'bi_back',
@@ -46,7 +46,6 @@ const DOC_ID_TO_TYPE: Record<string, DriverDocumentServerType> = {
 
 const DriverContext = createContext<DriverContextValue | undefined>(undefined);
 
-const VERIFY_DURATION_MS = 2200;
 const LOCATION_UPDATE_INTERVAL_MS = 10000;
 const ACTIVE_TRIP_POLL_INTERVAL_MS = 5000;
 
@@ -61,10 +60,39 @@ function toIncomingRequest(view: DriverTripView): IncomingTripRequest {
     tripDurationMinutes: view.durationMinutes,
     estimatedEarningsKz: view.priceKz,
     estimatedCommissionKz: view.commissionKz,
+    zoneIncentiveKz: view.zoneIncentiveKz ?? 0,
     paymentMethod: (view.paymentMethodType as IncomingTripRequest['paymentMethod']) ?? 'wallet',
     passengerCoordinates: { latitude: view.origin.latitude, longitude: view.origin.longitude },
     destinationCoordinates: { latitude: view.destination.latitude, longitude: view.destination.longitude },
   };
+}
+
+/** Viagem ativa a partir do pedido aceite. Nada inventado: o codigo de embarque nunca chega ao motorista. */
+function toActiveTrip(req: IncomingTripRequest, passengerName: string): ActiveDriverTrip {
+  return {
+    id: req.id,
+    passengerName,
+    passengerRating: 0,
+    passengerTotalTrips: 0,
+    boardingCode: '',
+    status: 'heading_to_passenger',
+    originCoordinates: req.passengerCoordinates,
+    destinationCoordinates: req.destinationCoordinates,
+    destinationLabel: req.destinationLabel,
+    etaMinutes: req.tripDurationMinutes,
+    distanceKm: req.tripDistanceKm,
+    paymentMethod: req.paymentMethod,
+    fareKz: req.estimatedEarningsKz,
+    commissionKz: req.estimatedCommissionKz,
+    netEarningsKz: req.estimatedEarningsKz - req.estimatedCommissionKz,
+  };
+}
+
+/** Estado local equivalente ao estado do servidor, para retomar uma corrida depois de reabrir a app. */
+function resumeStatus(view: DriverTripView): DriverTripStatus {
+  if (view.status === 'in_progress') return 'in_progress';
+  if (view.boardingConfirmed) return 'boarding';
+  return 'heading_to_passenger';
 }
 
 export function DriverProvider({ children }: { children: React.ReactNode }) {
@@ -76,17 +104,13 @@ export function DriverProvider({ children }: { children: React.ReactNode }) {
   const activeTripPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const activeTripRef = useRef<ActiveDriverTrip | null>(null);
-  // Viagens do botao "Simular nova corrida" nao existem no backend - por isso
-  // o embarque/inicio/conclusao delas fica so local, sem chamar o servidor.
-  const isSimulatedTripRef = useRef(false);
   const { session } = useDriverAuth();
   const driverId = session?.driverId ?? '';
 
-  // Carteira: por agora local. Quando o backend tiver wallet proprio do
-  // motorista, isto passa a vir de GET /driver/wallet.
   const [wallet, setWallet] = useState<DriverWalletSummary | null>(null);
   const walletAvailableKz = wallet?.availableKz ?? 0;
-  const minimumOperatingBalanceKz = wallet?.minimumOperatingBalanceKz ?? mockWallet.minimumOperatingBalanceKz;
+  // O minimo vem do servidor (GET /driver/wallet); 0 ate carregar.
+  const minimumOperatingBalanceKz = wallet?.minimumOperatingBalanceKz ?? 0;
 
   const refreshWallet = async () => {
     try {
@@ -100,14 +124,15 @@ export function DriverProvider({ children }: { children: React.ReactNode }) {
     if (driverId) {
       refreshWallet();
       refreshDocuments();
+      registerForPushNotificationsAsync()
+        .then((token) => { if (token) driversApi.setPushToken(token).catch(() => {}); })
+        .catch(() => {});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [driverId]);
 
-  // Document Center (secoes 4, 5, 60): cada submissao fica "pending" ate
-  // revisao - nunca auto-aprova. Por agora local; no backend passara a vir
-  // de GET /driver/documents.
-  const [documentSlots, setDocumentSlots] = useState<DriverDocumentSlot[]>(mockDocumentSlots.map((s) => ({ ...s, submissionStatus: 'not_submitted' as const, rejectionReason: undefined })));
+  // Cada submissao fica "pending" ate revisao - nunca auto-aprova.
+  const [documentSlots, setDocumentSlots] = useState<DriverDocumentSlot[]>(DOCUMENT_SLOTS);
   const areDocumentsApproved = documentSlots.every((d) => d.submissionStatus === 'approved');
 
   const refreshDocuments = async () => {
@@ -125,7 +150,6 @@ export function DriverProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // Enviar nunca aprova: o servidor guarda como "pending" e so um revisor aprova.
   const submitDocument = async (id: string, imageBase64: string) => {
     const type = DOC_ID_TO_TYPE[id];
     if (!type) throw new Error('Tipo de documento desconhecido.');
@@ -139,8 +163,6 @@ export function DriverProvider({ children }: { children: React.ReactNode }) {
     activeTripRef.current = activeTrip;
   }, [activeTrip]);
 
-  // Envia a localizacao real do telemovel ao backend enquanto estiver online -
-  // e isso que alimenta GET /drivers/nearby no lado do passageiro.
   const sendLocationOnce = async () => {
     try {
       const { status } = await Location.getForegroundPermissionsAsync();
@@ -164,14 +186,12 @@ export function DriverProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // Liga ao canal em tempo real enquanto online e entra na sala deste motorista.
   useEffect(() => {
     if (!isOnline || !driverId) return;
     const socket = io(API_BASE_URL, { transports: ['websocket'] });
     socketRef.current = socket;
     socket.on('connect', () => socket.emit('join_driver_room', driverId));
     socket.on('trip_assigned', (p: any) => {
-      isSimulatedTripRef.current = false;
       setIncomingRequest({
         id: p.tripId,
         originLabel: p.originLabel,
@@ -181,6 +201,7 @@ export function DriverProvider({ children }: { children: React.ReactNode }) {
         tripDurationMinutes: p.tripDurationMinutes,
         estimatedEarningsKz: p.estimatedEarningsKz,
         estimatedCommissionKz: p.estimatedCommissionKz,
+        zoneIncentiveKz: p.zoneIncentiveKz ?? 0,
         paymentMethod: p.paymentMethod,
         passengerCoordinates: p.passengerCoordinates,
         destinationCoordinates: p.destinationCoordinates,
@@ -206,8 +227,7 @@ export function DriverProvider({ children }: { children: React.ReactNode }) {
     };
   }, [isOnline]);
 
-  // Rede de seguranca: se o socket perder um "trip_assigned" (app em segundo
-  // plano, reconexao, etc.), esta consulta periodica apanha o pedido na mesma.
+  // Rede de seguranca: se o socket perder um "trip_assigned", esta consulta apanha o pedido.
   useEffect(() => {
     if (!isOnline) {
       if (activeTripPollRef.current) {
@@ -222,8 +242,11 @@ export function DriverProvider({ children }: { children: React.ReactNode }) {
       try {
         const { trip } = await driverTripsApi.active();
         if (trip && trip.status === 'driver_assigned') {
-          isSimulatedTripRef.current = false;
           setIncomingRequest(toIncomingRequest(trip));
+        } else if (trip && (trip.status === 'driver_arriving' || trip.status === 'in_progress')) {
+          // resumeActive: corrida ja aceite que a app perdeu (fecho ou reinicio)
+          setActiveTrip({ ...toActiveTrip(toIncomingRequest(trip), trip.passengerName || 'Passageiro'), status: resumeStatus(trip), netEarningsKz: trip.netEarningsKz });
+          driversApi.setStatus('on_trip').catch(() => {});
         }
       } catch {
         // sem rede ou sem viagem - tenta outra vez no proximo ciclo
@@ -238,21 +261,41 @@ export function DriverProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOnline, incomingRequest, activeTrip]);
 
-  const goOnline = () => {
+  // O servidor decide: sem saldo minimo, documentos ou veiculo aprovado, recusa e o motorista nao fica online.
+  const goOnline = async () => {
     setIsVerifyingOnline(true);
-    setTimeout(async () => {
-      try {
-        // O servidor decide: sem saldo minimo responde 402 e o motorista nao fica online.
-        await driversApi.setStatus('online');
-        setIsVerifyingOnline(false);
-        setIsOnline(true);
-      } catch (e) {
-        setIsVerifyingOnline(false);
-        refreshWallet();
-        Alert.alert('Nao foi possivel ficar online', (e as Error).message);
-      }
-    }, VERIFY_DURATION_MS);
+    try {
+      await driversApi.setStatus('online');
+      setIsOnline(true);
+    } catch (e) {
+      refreshWallet();
+      Alert.alert('Nao foi possivel ficar online', (e as Error).message);
+    } finally {
+      setIsVerifyingOnline(false);
+    }
   };
+
+  // Se o servidor deixar de ter esta viagem activa (cancelada pelo passageiro, ou reserva
+  // reatribuida por falta), a app deixa de mostrar uma viagem que ja nao existe.
+  useEffect(() => {
+    const id = activeTrip?.id;
+    if (!id || id.startsWith('trip-') || activeTrip?.status === 'completed') return;
+    let alive = true;
+    const check = async () => {
+      try {
+        const { trip } = await driverTripsApi.active();
+        if (!alive || trip) return;
+        setActiveTrip(null);
+        refreshWallet();
+        Alert.alert('Viagem terminada', 'Esta viagem ja nao esta atribuida a ti (foi cancelada ou reatribuida).');
+      } catch {
+        // sem rede: tenta no ciclo seguinte
+      }
+    };
+    const timer = setInterval(check, 10000);
+    return () => { alive = false; clearInterval(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTrip?.id, activeTrip?.status]);
 
   const goOffline = () => {
     setIsOnline(false);
@@ -260,27 +303,40 @@ export function DriverProvider({ children }: { children: React.ReactNode }) {
     driversApi.setStatus('offline').catch(() => {});
   };
 
-  const simulateIncomingTrip = (request: IncomingTripRequest) => {
-    if (!isOnline || activeTrip) return;
-    isSimulatedTripRef.current = true;
-    setIncomingRequest(request);
-  };
-
-  const acceptIncomingTrip = () => {
-    if (!incomingRequest) return;
-    const simulated = isSimulatedTripRef.current;
-    setActiveTrip(buildActiveTripFromRequest(incomingRequest));
-    setIncomingRequest(null);
-    driversApi.setStatus('on_trip').catch(() => {});
-    if (!simulated) {
-      driverTripsApi.accept(incomingRequest.id).then(() => refreshWallet()).catch(() => {});
+  const acceptingRef = useRef(false);
+  // So abre a viagem depois de o servidor a confirmar. Se ja foi tomada ou cancelada, avisa.
+  const acceptIncomingTrip = async () => {
+    if (!incomingRequest || acceptingRef.current) return;
+    acceptingRef.current = true;
+    const req = incomingRequest;
+    try {
+      await driverTripsApi.accept(req.id);
+      let passengerName = 'Passageiro';
+      try {
+        const { trip } = await driverTripsApi.active();
+        if (trip?.passengerName) passengerName = trip.passengerName;
+      } catch {
+        // o nome e so apresentacao
+      }
+      setActiveTrip(toActiveTrip(req, passengerName));
+      // destino real apos aceitar: antes disto o motorista so conhece a zona
+      driverTripsApi.active().then(({ trip }) => {
+        if (!trip || trip.id !== req.id) return;
+        setActiveTrip((prev) => prev ? { ...prev, destinationLabel: trip.destination.label || trip.destination.address, destinationCoordinates: { latitude: trip.destination.latitude, longitude: trip.destination.longitude } } : prev);
+      }).catch(() => {});
+      setIncomingRequest(null);
+      driversApi.setStatus('on_trip').catch(() => {});
+      refreshWallet();
+    } catch (e) {
+      setIncomingRequest(null);
+      Alert.alert('Corrida indisponivel', (e as Error).message);
+    } finally {
+      acceptingRef.current = false;
     }
   };
 
   const declineIncomingTrip = () => {
-    if (incomingRequest && !isSimulatedTripRef.current) {
-      driverTripsApi.decline(incomingRequest.id).catch(() => {});
-    }
+    if (incomingRequest) driverTripsApi.decline(incomingRequest.id).catch(() => {});
     setIncomingRequest(null);
   };
 
@@ -293,11 +349,6 @@ export function DriverProvider({ children }: { children: React.ReactNode }) {
   /** O codigo e sempre comparado no servidor - o motorista nunca o recebe. */
   const confirmBoarding = async (enteredCode: string): Promise<{ ok: boolean; message?: string }> => {
     if (!activeTrip) return { ok: false };
-    if (isSimulatedTripRef.current) {
-      if (enteredCode.length !== 4) return { ok: false, message: 'Codigo incorreto.' };
-      setTripStatus('boarding');
-      return { ok: true };
-    }
     try {
       await driverTripsApi.confirmBoarding(activeTrip.id, enteredCode);
       setTripStatus('boarding');
@@ -310,24 +361,23 @@ export function DriverProvider({ children }: { children: React.ReactNode }) {
 
   const startTrip = async () => {
     if (!activeTrip) return;
-    if (!isSimulatedTripRef.current) {
-      try {
-        await driverTripsApi.start(activeTrip.id);
-      } catch {
-        return;
-      }
+    try {
+      await driverTripsApi.start(activeTrip.id);
+    } catch (e) {
+      Alert.alert('Nao foi possivel iniciar a viagem', (e as Error).message);
+      return;
     }
     setTripStatus('in_progress');
   };
 
   const completeTrip = async () => {
-    if (activeTrip && !isSimulatedTripRef.current) {
-      try {
-        const result = await driverTripsApi.complete(activeTrip.id);
-        setActiveTrip((trip) => (trip ? { ...trip, netEarningsKz: result.netEarningsKz } : trip));
-      } catch {
-        // continua mesmo que a chamada falhe - nao bloqueia o motorista
-      }
+    if (!activeTrip) return;
+    try {
+      const result = await driverTripsApi.complete(activeTrip.id);
+      setActiveTrip((trip) => (trip ? { ...trip, netEarningsKz: result.netEarningsKz } : trip));
+    } catch (e) {
+      Alert.alert('Nao foi possivel finalizar a viagem', (e as Error).message + '\n\nVerifica a ligacao e tenta outra vez.');
+      return;
     }
     setTripStatus('completed');
     refreshWallet();
@@ -336,7 +386,6 @@ export function DriverProvider({ children }: { children: React.ReactNode }) {
 
   const clearActiveTrip = () => {
     setActiveTrip(null);
-    isSimulatedTripRef.current = false;
   };
 
   const value = useMemo(
@@ -359,7 +408,6 @@ export function DriverProvider({ children }: { children: React.ReactNode }) {
       startTrip,
       completeTrip,
       clearActiveTrip,
-      simulateIncomingTrip,
       documentSlots,
       areDocumentsApproved,
       submitDocument,
@@ -376,7 +424,3 @@ export function useDriver() {
   if (!ctx) throw new Error('useDriver deve ser usado dentro de um <DriverProvider>');
   return ctx;
 }
-
-
-
-

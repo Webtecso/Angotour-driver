@@ -16,6 +16,10 @@ export type HomeStackParamList = {
 
 export type ProfileStackParamList = {
   MonthlyServices: undefined;
+  Ratings: undefined;
+  Support: undefined;
+  About: undefined;
+  Settings: undefined;
   ProfileMain: undefined;
   Vehicle: undefined;
   Incentives: undefined;

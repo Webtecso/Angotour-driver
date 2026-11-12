@@ -1,10 +1,10 @@
-﻿import React, { useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+﻿import React, { useCallback, useState } from 'react';
+import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenContainer from '../../components/common/ScreenContainer';
 import AnchorTabs from '../../components/common/AnchorTabs';
-import { mockScheduledTrips, mockTripHistory } from '../../services/mockData';
-import { ScheduledTrip } from '../../types';
+import { useFocusEffect } from '@react-navigation/native';
+import { driverProfileApi, driverReservationsApi, DriverHistoryItem, ScheduledTripView } from '../../services/api';
 import { colors, radius, spacing, typography } from '../../constants/theme';
 
 const TABS = [
@@ -22,11 +22,36 @@ function formatHistory(dateIso: string) {
 
 export default function TripsScreen() {
   const [activeTab, setActiveTab] = useState('agendadas');
-  const [scheduledTrips, setScheduledTrips] = useState<ScheduledTrip[]>(mockScheduledTrips);
-
-  const handleAccept = (id: string) => {
-    setScheduledTrips((prev) => prev.map((t) => (t.id === id ? { ...t, isAccepted: true } : t)));
+  const [history, setHistory] = useState<DriverHistoryItem[] | null>(null);
+  const [error, setError] = useState('');
+  const [scheduledTrips, setScheduledTrips] = useState<ScheduledTripView[]>([]);
+  const loadScheduled = useCallback(() => {
+    driverReservationsApi.list().then((s) => { setScheduledTrips(s); setError(''); }).catch((e) => setError((e as Error).message));
+  }, []);
+  const handleAccept = async (id: string) => {
+    try {
+      await driverReservationsApi.reserve(id);
+    } catch (e) {
+      Alert.alert('Nao foi possivel reservar', (e as Error).message);
+    }
+    loadScheduled();
   };
+  const handleRelease = (id: string) => {
+    Alert.alert('Desistir da reserva', 'A reserva volta a ficar disponivel para outros motoristas.', [
+      { text: 'Manter', style: 'cancel' },
+      {
+        text: 'Desistir', style: 'destructive',
+        onPress: async () => {
+          try { await driverReservationsApi.release(id); } catch (e) { Alert.alert('Nao foi possivel desistir', (e as Error).message); }
+          loadScheduled();
+        },
+      },
+    ]);
+  };
+  useFocusEffect(useCallback(() => {
+    driverProfileApi.history().then((h) => { setHistory(h); setError(''); }).catch((e) => setError((e as Error).message));
+    loadScheduled();
+  }, []));
 
   return (
     <ScreenContainer style={styles.container}>
@@ -36,7 +61,7 @@ export default function TripsScreen() {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
         {activeTab === 'agendadas' ? (
           scheduledTrips.length === 0 ? (
-            <EmptyState icon="calendar-outline" title="Sem viagens agendadas" subtitle="As reservas atribuidas a ti vao aparecer aqui." />
+            <EmptyState icon="calendar-outline" title="Sem viagens agendadas" subtitle="Quando um passageiro agendar uma viagem, ela aparece aqui para a reservares." />
           ) : (
             scheduledTrips.map((trip) => (
               <View key={trip.id} style={styles.card}>
@@ -58,41 +83,38 @@ export default function TripsScreen() {
                 <View style={styles.cardFooterRow}>
                   <Text style={styles.cardEarnings}>{trip.estimatedEarningsKz.toLocaleString('pt-AO')} Kz - {trip.distanceKm.toFixed(1)} km</Text>
                   {trip.isAccepted ? (
-                    <View style={styles.acceptedBadge}>
+                    <TouchableOpacity style={styles.acceptedBadge} activeOpacity={0.7} onPress={() => handleRelease(trip.id)}>
                       <Ionicons name="checkmark-circle" size={14} color={colors.primary} />
-                      <Text style={styles.acceptedText}>Aceite</Text>
-                    </View>
+                      <Text style={styles.acceptedText}>Reservada - tocar para desistir</Text>
+                    </TouchableOpacity>
                   ) : (
                     <TouchableOpacity style={styles.acceptButton} activeOpacity={0.85} onPress={() => handleAccept(trip.id)}>
-                      <Text style={styles.acceptButtonText}>Aceitar</Text>
+                      <Text style={styles.acceptButtonText}>Reservar</Text>
                     </TouchableOpacity>
                   )}
                 </View>
               </View>
             ))
           )
-        ) : mockTripHistory.length === 0 ? (
+        ) : history === null ? (
+          <EmptyState icon="time-outline" title={error || 'A carregar...'} subtitle="" />
+        ) : history.length === 0 ? (
           <EmptyState icon="car-outline" title="O teu historico de corridas vai aparecer aqui" subtitle="Fica online para comecar a receber pedidos." />
         ) : (
-          mockTripHistory.map((trip) => (
+          history.map((trip) => (
             <View key={trip.id} style={styles.historyCard}>
               <View style={styles.historyIconBadge}>
                 <Ionicons name={trip.status === 'cancelled' ? 'close-circle-outline' : 'car-outline'} size={18} color={trip.status === 'cancelled' ? colors.danger : colors.textPrimary} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.historyRoute} numberOfLines={1}>{trip.originLabel} para {trip.destinationLabel}</Text>
-                <Text style={styles.historyMeta}>{formatHistory(trip.dateIso)} - {trip.distanceKm.toFixed(1)} km</Text>
+                <Text style={styles.historyRoute} numberOfLines={1}>{trip.originLabel ?? '-'} para {trip.destinationLabel ?? '-'}</Text>
+                <Text style={styles.historyMeta}>{formatHistory(trip.completedAt ?? trip.createdAt)} - {trip.distanceKm.toFixed(1)} km</Text>
                 {trip.status === 'cancelled' ? (
                   <Text style={styles.cancelledTag}>Cancelada</Text>
-                ) : trip.passengerRating ? (
-                  <View style={styles.ratingRow}>
-                    <Ionicons name="star" size={11} color={colors.amber} />
-                    <Text style={styles.ratingText}>{trip.passengerRating.toFixed(1)}</Text>
-                  </View>
                 ) : null}
               </View>
               <Text style={[styles.historyValue, trip.status === 'cancelled' && styles.historyValueMuted]}>
-                {trip.status === 'cancelled' ? '-' : `${trip.netEarningsKz.toLocaleString('pt-AO')} Kz`}
+                {trip.status === 'cancelled' ? '-' : `${trip.priceKz.toLocaleString('pt-AO')} Kz`}
               </Text>
             </View>
           ))

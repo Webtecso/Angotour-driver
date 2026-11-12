@@ -1,9 +1,11 @@
-﻿import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Alert, Linking, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenContainer from '../../components/common/ScreenContainer';
 import Button from '../../components/common/Button';
+import DriverMapView from '../../components/home/DriverMapView';
+import TripChat from '../../components/chat/TripChat';
 import { useDriver } from '../../contexts/DriverContext';
 import * as Location from 'expo-location';
 import { driverSafetyApi, driverVehicleApi, DriverVehicleView } from '../../services/api';
@@ -22,9 +24,27 @@ export default function TripNavigationScreen({ navigation }: Props) {
   const [sosVisible, setSosVisible] = useState(false);
   const [paymentReceived, setPaymentReceived] = useState(false);
   const [vehicle, setVehicle] = useState<DriverVehicleView | null>(null);
+  const [chatVisible, setChatVisible] = useState(false);
 
   useEffect(() => {
     driverVehicleApi.get().then((r) => setVehicle(r.vehicle)).catch(() => {});
+  }, []);
+
+  // Posicao do motorista para o mapa (a cada 8 s).
+  const [me, setMe] = useState<{ latitude: number; longitude: number } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const tick = async () => {
+      try {
+        const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        if (alive) setMe({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
+      } catch {
+        // sem GPS: o mapa mostra so passageiro e destino
+      }
+    };
+    tick();
+    const timer = setInterval(tick, 8000);
+    return () => { alive = false; clearInterval(timer); };
   }, []);
 
   if (!activeTrip) {
@@ -47,6 +67,16 @@ export default function TripNavigationScreen({ navigation }: Props) {
 
   const handleFinish = () => {
     completeTrip();
+  };
+
+  // Navegacao passo a passo na aplicacao de mapas do telemovel.
+  const openNavigation = async (to: { latitude: number; longitude: number }) => {
+    const url = 'https://www.google.com/maps/dir/?api=1&destination=' + to.latitude + ',' + to.longitude + '&travelmode=driving';
+    try {
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert('Navegacao', 'Nao foi possivel abrir a aplicacao de mapas.');
+    }
   };
 
   const handleClose = () => {
@@ -86,9 +116,12 @@ export default function TripNavigationScreen({ navigation }: Props) {
           <View style={{ width: 24 }} />
         </View>
 
-        <View style={styles.mapPlaceholder}>
-          <Ionicons name="navigate" size={32} color={colors.primary} />
-          <Text style={styles.mapPlaceholderText}>Mapa - a caminho do passageiro</Text>
+        <View style={styles.mapBox}>
+          <DriverMapView
+            center={activeTrip.originCoordinates}
+            markers={[...(me ? [{ ...me, kind: 'me' as const }] : []), { ...activeTrip.originCoordinates, kind: 'passenger' as const }]}
+            fitKey={'to-passenger-' + (me ? 'gps' : 'nogps')}
+          />
         </View>
 
         <View style={styles.etaCard}>
@@ -96,7 +129,10 @@ export default function TripNavigationScreen({ navigation }: Props) {
           <Text style={styles.etaDistance}>{activeTrip.distanceKm.toFixed(1)} km ate ao destino final</Text>
         </View>
 
-        <Button label="CHEGUEI" onPress={markArrived} style={{ marginTop: spacing.md }} />
+        <Button label="NAVEGAR ATE AO PASSAGEIRO" variant="outline" onPress={() => openNavigation(activeTrip.originCoordinates)} style={{ marginTop: spacing.md }} />
+        <Button label="MENSAGENS" variant="outline" onPress={() => setChatVisible(true)} style={{ marginTop: spacing.sm }} />
+        <TripChat visible={chatVisible} onClose={() => setChatVisible(false)} tripId={activeTrip.id} />
+        <Button label="CHEGUEI" onPress={markArrived} style={{ marginTop: spacing.sm }} />
         <Button label="SEGURANCA" variant="outline" onPress={() => setSosVisible(true)} style={{ marginTop: spacing.sm }} />
 
         {sosVisible ? <SosSheet onSelect={handleSos} onClose={() => setSosVisible(false)} /> : null}
@@ -128,6 +164,8 @@ export default function TripNavigationScreen({ navigation }: Props) {
           {codeError ? <Text style={styles.codeErrorText}>{codeMessage || 'Codigo incorreto. Confirma com o passageiro.'}</Text> : null}
 
           <Button label="CONFIRMAR EMBARQUE" onPress={handleConfirmBoarding} loading={isConfirming} disabled={codeInput.length !== 4 || isConfirming} style={{ marginTop: spacing.md }} />
+          <Button label="MENSAGENS" variant="outline" onPress={() => setChatVisible(true)} style={{ marginTop: spacing.sm }} />
+          <TripChat visible={chatVisible} onClose={() => setChatVisible(false)} tripId={activeTrip.id} />
         </ScrollView>
       </ScreenContainer>
     );
@@ -164,9 +202,12 @@ export default function TripNavigationScreen({ navigation }: Props) {
           <Text style={styles.headerTitle}>EM VIAGEM - {activeTrip.distanceKm.toFixed(1)} km</Text>
         </View>
 
-        <View style={styles.mapPlaceholder}>
-          <Ionicons name="navigate" size={32} color={colors.primary} />
-          <Text style={styles.mapPlaceholderText}>Mapa - a caminho de {activeTrip.destinationLabel}</Text>
+        <View style={styles.mapBox}>
+          <DriverMapView
+            center={activeTrip.destinationCoordinates}
+            markers={[...(me ? [{ ...me, kind: 'me' as const }] : []), { ...activeTrip.destinationCoordinates, kind: 'destination' as const }]}
+            fitKey={'to-destination-' + (me ? 'gps' : 'nogps')}
+          />
         </View>
 
         <View style={styles.etaCard}>
@@ -175,7 +216,10 @@ export default function TripNavigationScreen({ navigation }: Props) {
           <Text style={styles.etaDistance}>ETA: {activeTrip.etaMinutes} min</Text>
         </View>
 
-        <Button label="FINALIZAR VIAGEM" onPress={handleFinish} style={{ marginTop: spacing.md }} />
+        <Button label="NAVEGAR ATE AO DESTINO" variant="outline" onPress={() => openNavigation(activeTrip.destinationCoordinates)} style={{ marginTop: spacing.md }} />
+        <Button label="MENSAGENS" variant="outline" onPress={() => setChatVisible(true)} style={{ marginTop: spacing.sm }} />
+        <TripChat visible={chatVisible} onClose={() => setChatVisible(false)} tripId={activeTrip.id} />
+        <Button label="FINALIZAR VIAGEM" onPress={handleFinish} style={{ marginTop: spacing.sm }} />
         <Button label="SEGURANCA" variant="outline" onPress={() => setSosVisible(true)} style={{ marginTop: spacing.sm }} />
 
         {sosVisible ? <SosSheet onSelect={handleSos} onClose={() => setSosVisible(false)} /> : null}
@@ -242,6 +286,7 @@ const styles = StyleSheet.create({
   headerTitle: { ...typography.h3, color: colors.textPrimary, marginBottom: spacing.md },
   mapPlaceholder: { flex: 1, backgroundColor: colors.surface, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center', minHeight: 260, marginBottom: spacing.md },
   mapPlaceholderText: { ...typography.caption, color: colors.textSecondary, marginTop: spacing.xs },
+  mapBox: { flex: 1, minHeight: 260, borderRadius: radius.lg, overflow: 'hidden', borderWidth: 1, borderColor: colors.border, marginBottom: spacing.md },
   etaCard: { backgroundColor: colors.surface, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, padding: spacing.md },
   etaLabel: { ...typography.caption, color: colors.textSecondary },
   etaMinutes: { ...typography.h2, color: colors.textPrimary },

@@ -1,10 +1,11 @@
-﻿import React, { useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+﻿import React, { useCallback, useState } from 'react';
+import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import ScreenContainer from '../../components/common/ScreenContainer';
 import Button from '../../components/common/Button';
-import { mockLostItems } from '../../services/mockData';
+import { useFocusEffect } from '@react-navigation/native';
+import { driverExtrasApi } from '../../services/api';
 import { LostItemCategory, LostItemReport, LostItemStatus } from '../../types';
 import { ProfileStackParamList } from '../../navigation/types';
 import { colors, radius, spacing, typography } from '../../constants/theme';
@@ -36,24 +37,31 @@ function formatDate(dateIso: string) {
 }
 
 export default function LostItemsScreen({ navigation }: Props) {
-  const [items, setItems] = useState<LostItemReport[]>(mockLostItems);
+  const [items, setItems] = useState<LostItemReport[]>([]);
+  const [sending, setSending] = useState(false);
+  const loadItems = useCallback(() => {
+    driverExtrasApi.lostItems().then(setItems).catch(() => {});
+  }, []);
+  useFocusEffect(useCallback(() => { loadItems(); }, [loadItems]));
   const [isReporting, setIsReporting] = useState(false);
   const [category, setCategory] = useState<LostItemCategory | null>(null);
   const [description, setDescription] = useState('');
 
-  const handleSubmit = () => {
-    if (!category || description.trim().length < 5) return;
-    const report: LostItemReport = {
-      id: 'li-' + Date.now(),
-      category,
-      description: description.trim(),
-      dateIso: new Date().toISOString(),
-      status: 'reported',
-    };
-    setItems((prev) => [report, ...prev]);
-    setCategory(null);
-    setDescription('');
-    setIsReporting(false);
+  const handleSubmit = async () => {
+    if (!category || description.trim().length < 5 || sending) return;
+    setSending(true);
+    try {
+      const r = await driverExtrasApi.reportLostItem({ category, description: description.trim() });
+      setCategory(null);
+      setDescription('');
+      setIsReporting(false);
+      loadItems();
+      Alert.alert('Reportado', 'Caso ' + r.caseNumber + ' registado. A equipa AngoTour vai contactar o passageiro.');
+    } catch (e) {
+      Alert.alert('Nao foi possivel reportar', (e as Error).message);
+    } finally {
+      setSending(false);
+    }
   };
 
   return (

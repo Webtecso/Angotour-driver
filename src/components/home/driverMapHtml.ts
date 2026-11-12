@@ -1,4 +1,4 @@
-﻿export const DRIVER_MAP_HTML = `<!DOCTYPE html>
+export const DRIVER_MAP_HTML = `<!DOCTYPE html>
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
@@ -10,6 +10,10 @@
   .me .dot { position: absolute; left: 3px; top: 3px; width: 16px; height: 16px; border-radius: 50%; background: #0FA968; border: 3px solid #0B1210; box-sizing: border-box; }
   .me .pulse { position: absolute; left: -13px; top: -13px; width: 48px; height: 48px; border-radius: 50%; background: #0FA968; animation: pulse 2s ease-out infinite; }
   @keyframes pulse { 0% { transform: scale(0.3); opacity: 0.5; } 100% { transform: scale(1); opacity: 0; } }
+  .pin { position: relative; width: 26px; height: 26px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); border: 3px solid #0B1210; box-sizing: border-box; }
+  .pin::after { content: ''; position: absolute; left: 6px; top: 6px; width: 8px; height: 8px; border-radius: 50%; background: #0B1210; }
+  .pin.passenger { background: #0FA968; }
+  .pin.destination { background: #E63946; }
 </style>
 </head>
 <body>
@@ -43,6 +47,36 @@ window.setZones = function (zones) {
     }).addTo(map);
     zoneLayers.push(circle);
   });
+};
+var viewReady = false;
+var markerLayers = [];
+var lastFitKey = null;
+
+// Navegacao da viagem: motorista, passageiro e destino. O zoom so se reajusta quando fitKey muda.
+window.setMarkers = function (list, fitKey) {
+  markerLayers.forEach(function (l) { map.removeLayer(l); });
+  markerLayers = [];
+  if (!list || !list.length) return;
+  if (!viewReady) {
+    map.setView([list[0].latitude, list[0].longitude], 14, { animate: false });
+    viewReady = true;
+  }
+  var pts = [];
+  list.forEach(function (m) {
+    var icon;
+    if (m.kind === 'me') {
+      icon = L.divIcon({ className: '', html: '<div class="me"><div class="pulse"></div><div class="dot"></div></div>', iconSize: [22, 22], iconAnchor: [11, 11] });
+    } else {
+      icon = L.divIcon({ className: '', html: '<div class="pin ' + m.kind + '"></div>', iconSize: [26, 26], iconAnchor: [13, 31] });
+    }
+    markerLayers.push(L.marker([m.latitude, m.longitude], { icon: icon, interactive: false }).addTo(map));
+    pts.push([m.latitude, m.longitude]);
+  });
+  if (fitKey !== lastFitKey) {
+    lastFitKey = fitKey;
+    if (pts.length > 1) { map.fitBounds(pts, { padding: [40, 40], maxZoom: 16, animate: false }); }
+    else { map.setView(pts[0], 15, { animate: false }); }
+  }
 };
 </script>
 </body>

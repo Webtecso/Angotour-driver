@@ -12,7 +12,7 @@ interface ScreenContainerProps {
 export default function ScreenContainer({ children, edges = ['top', 'left', 'right'], style }: ScreenContainerProps) {
   return (
     <SafeAreaView style={styles.safeArea} edges={edges}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.background} />
+      <StatusBar barStyle="light-content" />
       <View style={[styles.content, style]}>{children}</View>
     </SafeAreaView>
   );

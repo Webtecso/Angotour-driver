@@ -68,7 +68,7 @@ export default function IncomingTripScreen({ navigation }: Props) {
         <View style={styles.routeRow}>
           <View style={[styles.dot, { backgroundColor: colors.danger }]} />
           <View style={{ flex: 1 }}>
-            <Text style={styles.routeLabel}>Destino</Text>
+            <Text style={styles.routeLabel}>Zona de destino</Text>
             <Text style={styles.routeAddress}>{incomingRequest.destinationLabel}</Text>
           </View>
         </View>
@@ -91,6 +91,12 @@ export default function IncomingTripScreen({ navigation }: Props) {
           <Text style={styles.metricLabel}>Comissao estimada</Text>
           <Text style={styles.metricValue}>{incomingRequest.estimatedCommissionKz.toLocaleString('pt-AO')} Kz</Text>
         </View>
+        {incomingRequest.zoneIncentiveKz ? (
+          <View style={styles.metricBox}>
+            <Text style={styles.metricLabel}>Incentivo de zona</Text>
+            <Text style={[styles.metricValue, { color: colors.primary }]}>+{incomingRequest.zoneIncentiveKz.toLocaleString('pt-AO')} Kz</Text>
+          </View>
+        ) : null}
       </View>
 
       <View style={styles.paymentRow}>

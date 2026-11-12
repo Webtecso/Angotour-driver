@@ -1,10 +1,11 @@
-﻿import React from 'react';
+import React, { useCallback, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import ScreenContainer from '../../components/common/ScreenContainer';
 import DriverMapView from '../../components/home/DriverMapView';
-import { mockDemandForecast, mockDemandZones } from '../../services/mockData';
+import { DemandZoneView, driverExtrasApi } from '../../services/api';
 import { HomeStackParamList } from '../../navigation/types';
 import { colors, radius, spacing, typography } from '../../constants/theme';
 
@@ -17,6 +18,18 @@ const LEGEND: { color: string; label: string }[] = [
 ];
 
 export default function DemandMapScreen({ navigation }: Props) {
+  const [zones, setZones] = useState<DemandZoneView[]>([]);
+  const [forecast, setForecast] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState('');
+
+  useFocusEffect(useCallback(() => {
+    driverExtrasApi.demand()
+      .then((r) => { setZones(r.zones); setForecast(r.forecast); setError(''); })
+      .catch((e) => setError((e as Error).message))
+      .finally(() => setLoaded(true));
+  }, []));
+
   return (
     <ScreenContainer style={styles.container} edges={['top', 'left', 'right']}>
       <View style={styles.headerRow}>
@@ -25,7 +38,7 @@ export default function DemandMapScreen({ navigation }: Props) {
       </View>
 
       <View style={styles.mapArea}>
-        <DriverMapView center={{ latitude: -8.8983, longitude: 13.2344 }} zoom={12} zones={mockDemandZones} />
+        <DriverMapView center={{ latitude: -8.8983, longitude: 13.2344 }} zoom={12} zones={zones} />
       </View>
 
       <View style={styles.legendRow}>
@@ -39,7 +52,9 @@ export default function DemandMapScreen({ navigation }: Props) {
 
       <View style={styles.forecastCard}>
         <Ionicons name="trending-up-outline" size={18} color={colors.primary} />
-        <Text style={styles.forecastText}>{mockDemandForecast}</Text>
+        <Text style={styles.forecastText}>
+          {error || forecast || (loaded ? 'Ainda sem dados suficientes. O mapa enche a medida que houver viagens.' : 'A carregar...')}
+        </Text>
       </View>
     </ScreenContainer>
   );

@@ -1,9 +1,10 @@
-﻿import React from 'react';
+﻿import React, { useCallback, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import ScreenContainer from '../../components/common/ScreenContainer';
-import { mockDriverProfile, mockEarnings } from '../../services/mockData';
+import { useFocusEffect } from '@react-navigation/native';
+import { driverProfileApi, DriverProfileView } from '../../services/api';
 import { useDriver } from '../../contexts/DriverContext';
 import { ProfileStackParamList } from '../../navigation/types';
 import { colors, radius, spacing, typography } from '../../constants/theme';
@@ -14,17 +15,25 @@ const MENU_ITEMS: { icon: React.ComponentProps<typeof Ionicons>['name']; label: 
   { icon: 'document-text-outline', label: 'Meus documentos', route: 'DocumentCenter' },
   { icon: 'car-outline', label: 'Meu veiculo', route: 'Vehicle' },
   { icon: 'calendar-outline', label: 'Servicos mensais', route: 'MonthlyServices' },
-  { icon: 'star-outline', label: 'Avaliacoes' },
+  { icon: 'star-outline', label: 'Avaliacoes', route: 'Ratings' },
   { icon: 'trophy-outline', label: 'Incentivos', route: 'Incentives' },
   { icon: 'briefcase-outline', label: 'Objetos perdidos', route: 'LostItems' },
   { icon: 'earth-outline', label: 'Perfil Turismo', route: 'TourismProfile' },
-  { icon: 'help-buoy-outline', label: 'Suporte' },
-  { icon: 'settings-outline', label: 'Configuracoes' },
-  { icon: 'information-circle-outline', label: 'Sobre o AngoTour' },
+  { icon: 'help-buoy-outline', label: 'Suporte', route: 'Support' },
+  { icon: 'settings-outline', label: 'Configuracoes', route: 'Settings' },
+  { icon: 'information-circle-outline', label: 'Sobre o AngoTour', route: 'About' },
 ];
 
 export default function ProfileScreen({ navigation }: Props) {
   const { areDocumentsApproved } = useDriver();
+  const [profile, setProfile] = useState<DriverProfileView | null>(null);
+  useFocusEffect(useCallback(() => {
+    driverProfileApi.me().then(setProfile).catch(() => {});
+  }, []));
+  const name = profile?.fullName ?? '...';
+  const rating = profile?.rating ?? 0;
+  const trips = profile?.tripsCompleted ?? 0;
+  const since = profile ? Math.max(0, Math.floor((Date.now() - new Date(profile.memberSince).getTime()) / 86400000)) : 0;
   const documentsBadge = areDocumentsApproved ? 'Verificado' : 'Pendente';
 
   return (
@@ -32,14 +41,14 @@ export default function ProfileScreen({ navigation }: Props) {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
         <View style={styles.profileHeader}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarInitial}>{mockDriverProfile.fullName.charAt(0)}</Text>
+            <Text style={styles.avatarInitial}>{name.charAt(0)}</Text>
           </View>
-          <Text style={styles.name}>{mockDriverProfile.fullName}</Text>
+          <Text style={styles.name}>{name}</Text>
           <View style={styles.ratingRow}>
             <Ionicons name="star" size={13} color={colors.amber} />
-            <Text style={styles.ratingText}>{mockDriverProfile.rating.toFixed(1)} ({mockDriverProfile.totalTrips.toLocaleString('pt-AO')} viagens)</Text>
+            <Text style={styles.ratingText}>{rating.toFixed(1)} ({trips.toLocaleString('pt-AO')} viagens)</Text>
           </View>
-          {mockDriverProfile.accountStatus === 'active' ? (
+          {profile?.isVerified ? (
             <View style={styles.verifiedBadge}>
               <Ionicons name="checkmark-circle" size={13} color={colors.primary} />
               <Text style={styles.verifiedText}>Motorista verificado</Text>
@@ -50,17 +59,17 @@ export default function ProfileScreen({ navigation }: Props) {
         <View style={styles.statsCard}>
           <View style={styles.statBox}>
             <Text style={styles.statLabel}>Viagens</Text>
-            <Text style={styles.statValue}>{mockDriverProfile.totalTrips.toLocaleString('pt-AO')}</Text>
+            <Text style={styles.statValue}>{trips.toLocaleString('pt-AO')}</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statBox}>
-            <Text style={styles.statLabel}>Tempo online</Text>
-            <Text style={styles.statValue}>156h</Text>
+            <Text style={styles.statLabel}>Na plataforma</Text>
+            <Text style={styles.statValue}>{since} dias</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statBox}>
             <Text style={styles.statLabel}>Avaliacao</Text>
-            <Text style={styles.statValue}>{mockDriverProfile.rating.toFixed(1)} *</Text>
+            <Text style={styles.statValue}>{rating.toFixed(1)} *</Text>
           </View>
         </View>
 

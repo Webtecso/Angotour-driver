@@ -1,12 +1,12 @@
-﻿import React, { useEffect } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { ActivityIndicator, Dimensions, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import DriverMapView from '../../components/home/DriverMapView';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useFocusEffect } from '@react-navigation/native';
 import { useDriver } from '../../contexts/DriverContext';
-import { mockEarnings, mockIncomingTrip, mockWallet } from '../../services/mockData';
 import { HomeStackParamList } from '../../navigation/types';
 import { colors, radius, shadow, spacing, typography } from '../../constants/theme';
 
@@ -21,19 +21,23 @@ const VERIFY_STEPS = ['GPS e localizacao', 'Internet', 'Carteira AngoTour', 'Doc
 const HERO_SOURCE = require('../../../assets/images/driver-hero.png');
 const HERO_ASSET = Image.resolveAssetSource(HERO_SOURCE);
 const SCREEN_WIDTH = Dimensions.get('window').width;
-// Altura da imagem NA PROPORCAO REAL do ficheiro (nunca distorce).
+const SCREEN_HEIGHT = Dimensions.get('window').height;
+// Enche a largura toda (como no mockup) e mostra a imagem na proporcao
+// real do ficheiro. So corta o excesso de baixo (estrada vazia apos a
+// onda verde), limitado a uma fracao generosa da altura do ecra.
 const HERO_FULL_HEIGHT = HERO_ASSET?.width && HERO_ASSET?.height
   ? SCREEN_WIDTH * (HERO_ASSET.height / HERO_ASSET.width)
   : SCREEN_WIDTH * 1.6;
-// Corta so a parte de baixo (estrada vazia), ancorado ao topo - mostra ate
-// logo abaixo do carro, sem cortar o logotipo/texto no topo nem distorcer.
-const HERO_CROP_FRACTION = 0.85;
-const HERO_VISIBLE_HEIGHT = HERO_FULL_HEIGHT * HERO_CROP_FRACTION;
+const HERO_VISIBLE_HEIGHT = Math.min(HERO_FULL_HEIGHT, SCREEN_HEIGHT * 0.56);
 
 export default function HomeScreen({ navigation }: Props) {
-  const { isOnline, isVerifyingOnline, walletAvailableKz, areDocumentsApproved, incomingRequest, activeTrip, goOnline, goOffline, simulateIncomingTrip } = useDriver();
+  const { isOnline, isVerifyingOnline, walletAvailableKz, minimumOperatingBalanceKz, wallet, refreshWallet, areDocumentsApproved, incomingRequest, activeTrip, goOnline, goOffline } = useDriver();
+  useFocusEffect(useCallback(() => {
+    refreshWallet();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []));
 
-  const belowMinimum = walletAvailableKz < mockWallet.minimumOperatingBalanceKz;
+  const belowMinimum = walletAvailableKz < minimumOperatingBalanceKz;
   const documentsNotApproved = !areDocumentsApproved;
   const isBlocked = belowMinimum || documentsNotApproved;
 
@@ -58,7 +62,6 @@ export default function HomeScreen({ navigation }: Props) {
     return (
       <SafeAreaView style={styles.root} edges={['top', 'left', 'right']}>
         <View style={styles.verifyContainer}>
-          <Ionicons name="chevron-back" size={24} color={colors.textPrimary} style={styles.verifyBack} onPress={() => {}} />
           <Text style={styles.verifyTitle}>Verificacao de seguranca</Text>
           <Text style={styles.verifySubtitle}>Estamos a verificar se tudo esta correto para voce ficar online.</Text>
           <View style={styles.verifyList}>
@@ -87,31 +90,38 @@ export default function HomeScreen({ navigation }: Props) {
         </View>
 
         <ScrollView style={styles.offlineCard} contentContainerStyle={styles.offlineCardContent} showsVerticalScrollIndicator={false}>
-          <TouchableOpacity activeOpacity={0.85} onPress={goOnline} disabled={isBlocked}>
-            <LinearGradient
-              colors={isBlocked ? [colors.surfaceRaised, colors.surfaceRaised] : [colors.primaryDark, colors.primary]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.onlineToggle}
-            >
-              <Ionicons name="radio-button-on" size={16} color={colors.textInverse} />
-              <View style={{ marginLeft: spacing.xs }}>
-                <Text style={styles.onlineToggleTitle}>Online</Text>
-                <Text style={styles.onlineToggleSubtitle}>
-                  {belowMinimum ? 'Carteira insuficiente' : documentsNotApproved ? 'Documentos pendentes' : 'Pronto para receber corridas'}
-                </Text>
-              </View>
-            </LinearGradient>
-          </TouchableOpacity>
-
-          {belowMinimum ? (
-            <View style={styles.warningBox}>
-              <Ionicons name="alert-circle" size={16} color={colors.danger} />
-              <Text style={styles.warningText}>
-                Saldo atual {walletAvailableKz.toLocaleString('pt-AO')} Kz - minimo necessario {mockWallet.minimumOperatingBalanceKz.toLocaleString('pt-AO')} Kz. Carrega a carteira para continuar.
-              </Text>
+          <View style={styles.greetingCard}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.greetingTitle}>Ola, Motorista!</Text>
+              <Text style={styles.greetingSubtitle}>Esta pronto para receber novas corridas?</Text>
             </View>
-          ) : null}
+            <TouchableOpacity activeOpacity={0.85} onPress={goOnline} disabled={isBlocked}>
+              <View style={[styles.onlinePillOffline, isBlocked && styles.onlinePillDisabled]}>
+                <View style={[styles.onlineDotSmall, isBlocked && styles.onlineDotDisabled]} />
+                <Text style={styles.onlinePillOfflineText}>Online</Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.walletCardHome}>
+            <View style={styles.walletIconBadge}>
+              <Ionicons name="wallet" size={20} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1, marginLeft: spacing.sm }}>
+              <Text style={styles.walletCardLabel}>Carteira</Text>
+              <Text style={styles.walletCardValue}>{walletAvailableKz.toLocaleString('pt-AO')} Kz</Text>
+              {belowMinimum ? (
+                <View style={styles.walletMinRow}>
+                  <Ionicons name="alert-circle" size={13} color={colors.danger} />
+                  <Text style={styles.walletMinText}>Minimo necessario: {minimumOperatingBalanceKz.toLocaleString('pt-AO')} Kz</Text>
+                </View>
+              ) : null}
+            </View>
+            <TouchableOpacity style={styles.topUpButtonHome} activeOpacity={0.85} onPress={() => navigation.getParent()?.navigate('WalletTab' as never)}>
+              <Ionicons name="add-circle-outline" size={16} color={colors.textInverse} />
+              <Text style={styles.topUpButtonHomeText}>Carregar{'\n'}Carteira</Text>
+            </TouchableOpacity>
+          </View>
 
           {documentsNotApproved ? (
             <TouchableOpacity style={styles.warningBox} activeOpacity={0.85} onPress={handleOpenDocuments}>
@@ -125,18 +135,32 @@ export default function HomeScreen({ navigation }: Props) {
 
           <View style={styles.statsRow}>
             <View style={styles.statBox}>
-              <Text style={styles.statLabel}>Ganhos hoje</Text>
-              <Text style={styles.statValue}>{mockEarnings.todayKz.toLocaleString('pt-AO')} Kz</Text>
-            </View>
-            <View style={styles.statBox}>
+              <View style={styles.statBoxHeader}>
+                <Ionicons name="car-outline" size={16} color={colors.primary} />
+                <Ionicons name="trending-up" size={13} color={colors.primary} />
+              </View>
               <Text style={styles.statLabel}>Corridas</Text>
-              <Text style={styles.statValue}>{mockEarnings.todayTrips}</Text>
+              <Text style={styles.statValue}>{wallet?.todayTrips ?? 0}</Text>
             </View>
             <View style={styles.statBox}>
-              <Text style={styles.statLabel}>Tempo online</Text>
-              <Text style={styles.statValue}>{mockEarnings.todayOnlineHours.toFixed(1)}h</Text>
+              <View style={styles.statBoxHeader}>
+                <Ionicons name="stats-chart" size={16} color={colors.primary} />
+                <Ionicons name="trending-up" size={13} color={colors.primary} />
+              </View>
+              <Text style={styles.statLabel}>Ganhos hoje</Text>
+              <Text style={styles.statValue}>{(wallet?.todayNetKz ?? 0).toLocaleString('pt-AO')} Kz</Text>
             </View>
           </View>
+
+          {belowMinimum ? (
+            <View style={styles.alertBanner}>
+              <Ionicons name="alert-circle" size={18} color={colors.danger} />
+              <Text style={styles.alertBannerText}>
+                Saldo atual {walletAvailableKz.toLocaleString('pt-AO')} Kz - minimo necessario {minimumOperatingBalanceKz.toLocaleString('pt-AO')} Kz. Carrega a carteira para continuar.
+              </Text>
+              <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+            </View>
+          ) : null}
 
           <TouchableOpacity activeOpacity={0.85} onPress={goOnline} disabled={isBlocked}>
             <LinearGradient
@@ -145,10 +169,8 @@ export default function HomeScreen({ navigation }: Props) {
               end={{ x: 1, y: 1 }}
               style={styles.receiveButton}
             >
-              <View style={styles.receiveIconBadge}>
-                <MaterialCommunityIcons name="steering" size={18} color={colors.textInverse} />
-              </View>
-              <Text style={styles.receiveButtonText}>Receber corridas</Text>
+              <Ionicons name="play" size={18} color={colors.textInverse} />
+              <Text style={styles.receiveButtonText}>Aceitar Corridas</Text>
             </LinearGradient>
           </TouchableOpacity>
         </ScrollView>
@@ -200,9 +222,6 @@ export default function HomeScreen({ navigation }: Props) {
         </View>
       </View>
 
-      <TouchableOpacity style={styles.devButton} onPress={() => simulateIncomingTrip(mockIncomingTrip)}>
-        <Text style={styles.devButtonText}>Simular nova corrida (teste)</Text>
-      </TouchableOpacity>
     </SafeAreaView>
   );
 }
@@ -211,15 +230,34 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.background },
 
   offlineCard: { flex: 1, backgroundColor: colors.background },
-  offlineCardContent: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.xl },
+  offlineCardContent: { paddingHorizontal: spacing.lg, paddingTop: spacing.xs, paddingBottom: spacing.lg },
+  greetingCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surface, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, padding: spacing.sm, marginBottom: spacing.sm },
+  greetingTitle: { ...typography.subtitle, color: colors.textPrimary },
+  greetingSubtitle: { ...typography.caption, color: colors.textSecondary, marginTop: 2 },
+  onlinePillOffline: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.primaryLight, borderRadius: radius.pill, paddingHorizontal: spacing.sm, paddingVertical: 6 },
+  onlinePillDisabled: { backgroundColor: colors.surfaceRaised },
+  onlineDotSmall: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary, marginRight: spacing.xxs },
+  onlineDotDisabled: { backgroundColor: colors.textMuted },
+  onlinePillOfflineText: { ...typography.captionMedium, color: colors.primaryDark },
+  walletCardHome: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surface, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, padding: spacing.sm, marginBottom: spacing.sm },
+  walletIconBadge: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.surfaceRaised, alignItems: 'center', justifyContent: 'center' },
+  walletCardLabel: { ...typography.caption, color: colors.textSecondary },
+  walletCardValue: { ...typography.h3, color: colors.textPrimary, marginTop: 1 },
+  walletMinRow: { flexDirection: 'row', alignItems: 'center', marginTop: 2 },
+  walletMinText: { ...typography.tiny, color: colors.danger, marginLeft: 4 },
+  topUpButtonHome: { alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primary, borderRadius: radius.md, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
+  topUpButtonHomeText: { ...typography.tiny, color: colors.textInverse, textAlign: 'center' },
+  statBoxHeader: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginBottom: 4 },
+  alertBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.dangerLight, borderRadius: radius.lg, padding: spacing.sm, marginBottom: spacing.sm },
+  alertBannerText: { ...typography.caption, color: colors.textPrimary, marginLeft: spacing.xs, flex: 1, lineHeight: 18 },
   onlineToggle: { flexDirection: 'row', alignItems: 'center', borderRadius: radius.lg, padding: spacing.md, marginBottom: spacing.md },
   onlineToggleDisabled: { backgroundColor: colors.surfaceRaised },
   onlineToggleTitle: { ...typography.subtitle, color: colors.textInverse },
   onlineToggleSubtitle: { ...typography.caption, color: 'rgba(11,18,16,0.75)', marginTop: 1 },
-  warningBox: { flexDirection: 'row', backgroundColor: colors.dangerLight, borderRadius: radius.md, padding: spacing.sm, marginBottom: spacing.md },
+  warningBox: { flexDirection: 'row', backgroundColor: colors.dangerLight, borderRadius: radius.md, padding: spacing.sm, marginBottom: spacing.sm },
   warningText: { ...typography.caption, color: colors.textPrimary, marginLeft: spacing.xs, flex: 1 },
-  statsRow: { flexDirection: 'row', marginBottom: spacing.lg },
-  statBox: { flex: 1, backgroundColor: colors.surface, borderRadius: radius.md, borderWidth: 1, borderColor: colors.borderStrong, padding: spacing.md, marginRight: spacing.xs, alignItems: 'center', ...shadow.soft },
+  statsRow: { flexDirection: 'row', marginBottom: spacing.sm },
+  statBox: { flex: 1, backgroundColor: colors.surface, borderRadius: radius.md, borderWidth: 1, borderColor: colors.borderStrong, padding: spacing.sm, marginRight: spacing.xs, alignItems: 'center', ...shadow.soft },
   statLabel: { ...typography.tiny, color: colors.textMuted },
   statValue: { ...typography.bodyMedium, color: colors.textPrimary, marginTop: 2 },
   receiveButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderRadius: radius.lg, paddingVertical: spacing.md },

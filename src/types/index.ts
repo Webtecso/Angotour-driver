@@ -51,6 +51,7 @@ export interface IncomingTripRequest {
   tripDurationMinutes: number;
   estimatedEarningsKz: number;
   estimatedCommissionKz: number;
+  zoneIncentiveKz?: number;
   paymentMethod: IncomingTripPaymentMethod;
   passengerCoordinates: Coordinates;
   destinationCoordinates: Coordinates;

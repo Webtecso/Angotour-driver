@@ -1,17 +1,24 @@
-﻿import React from 'react';
+﻿import React, { useCallback, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import ScreenContainer from '../../components/common/ScreenContainer';
-import { mockChallenges, mockDailyGoal } from '../../services/mockData';
+import { useFocusEffect } from '@react-navigation/native';
+import { driverExtrasApi, IncentivesView } from '../../services/api';
 import { ProfileStackParamList } from '../../navigation/types';
 import { colors, radius, spacing, typography } from '../../constants/theme';
 
 type Props = NativeStackScreenProps<ProfileStackParamList, 'Incentives'>;
 
 export default function IncentivesScreen({ navigation }: Props) {
-  const goalFraction = Math.min(1, mockDailyGoal.achievedKz / mockDailyGoal.targetKz);
-  const goalRemainingKz = Math.max(0, mockDailyGoal.targetKz - mockDailyGoal.achievedKz);
+  const [data, setData] = useState<IncentivesView | null>(null);
+  useFocusEffect(useCallback(() => {
+    driverExtrasApi.incentives().then(setData).catch(() => {});
+  }, []));
+  const dailyGoal = data?.dailyGoal ?? { achievedKz: 0, targetKz: 1 };
+  const challenges = data?.challenges ?? [];
+  const goalFraction = Math.min(1, dailyGoal.achievedKz / dailyGoal.targetKz);
+  const goalRemainingKz = Math.max(0, dailyGoal.targetKz - dailyGoal.achievedKz);
 
   return (
     <ScreenContainer style={styles.container}>
@@ -24,8 +31,8 @@ export default function IncentivesScreen({ navigation }: Props) {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
         <View style={styles.goalCard}>
           <Text style={styles.goalLabel}>Meta diaria</Text>
-          <Text style={styles.goalValue}>{mockDailyGoal.achievedKz.toLocaleString('pt-AO')} Kz</Text>
-          <Text style={styles.goalTarget}>de {mockDailyGoal.targetKz.toLocaleString('pt-AO')} Kz</Text>
+          <Text style={styles.goalValue}>{dailyGoal.achievedKz.toLocaleString('pt-AO')} Kz</Text>
+          <Text style={styles.goalTarget}>de {dailyGoal.targetKz.toLocaleString('pt-AO')} Kz</Text>
 
           <View style={styles.progressTrack}>
             <View style={[styles.progressFill, { width: `${goalFraction * 100}%` }]} />
@@ -42,7 +49,7 @@ export default function IncentivesScreen({ navigation }: Props) {
         </View>
 
         <Text style={styles.sectionTitle}>Desafios ativos</Text>
-        {mockChallenges.map((challenge) => {
+        {challenges.map((challenge) => {
           const fraction = Math.min(1, challenge.progressCount / challenge.targetCount);
           const isDone = challenge.progressCount >= challenge.targetCount;
           return (
@@ -55,7 +62,7 @@ export default function IncentivesScreen({ navigation }: Props) {
                   <Text style={styles.challengeTitle}>{challenge.title}</Text>
                   <Text style={styles.challengeDescription}>{challenge.description}</Text>
                 </View>
-                <Text style={styles.challengeReward}>+{challenge.rewardKz.toLocaleString('pt-AO')} Kz</Text>
+                {challenge.rewardKz > 0 ? <Text style={styles.challengeReward}>+{challenge.rewardKz.toLocaleString('pt-AO')} Kz</Text> : null}
               </View>
 
               <View style={styles.progressTrackSmall}>
